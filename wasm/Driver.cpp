@@ -318,6 +318,7 @@ void LinkerDriver::link(ArrayRef<const char *> ArgsArr) {
 
   Config->AllowUndefined = Args.hasArg(OPT_allow_undefined);
   Config->Demangle = Args.hasFlag(OPT_demangle, OPT_no_demangle, true);
+  Config->DisableAbigen = Args.hasArg(OPT_disable_abigen);
   Config->DisableVerify = Args.hasArg(OPT_disable_verify);
   Config->Entry = getEntry(Args, Args.hasArg(OPT_relocatable) ? "" : "_start");
   Config->ExportAll = Args.hasArg(OPT_export_all);
@@ -523,6 +524,11 @@ void LinkerDriver::link(ArrayRef<const char *> ArgsArr) {
   // Do size optimizations: garbage collection
   markLive();
 
-  // Write the result to the file.
-  writeResult(true);
+  // Write the result to the file
+  if (Config->NoAbigen) {
+     writeResult(false);
+  }
+  else {
+     writeResult(true);
+  }
 }

@@ -57,6 +57,9 @@ def L: JoinedOrSeparate<["-"], "L">, MetaVarName<"<dir>">,
 
 def mllvm: S<"mllvm">, HelpText<"Options to pass to LLVM">;
 
+def no_abigen: F<"no-abigen">,
+  HelpText<"Disable ABI file generation">;
+
 def no_threads: F<"no-threads">,
   HelpText<"Do not run the linker multi-threaded">;
 

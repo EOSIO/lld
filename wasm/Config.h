@@ -37,6 +37,7 @@ struct Configuration {
   bool ImportMemory;
   bool ImportTable;
   bool MergeDataSegments;
+  bool NoAbigen;
   bool PrintGcSections;
   bool Relocatable;
   bool SaveTemps;
