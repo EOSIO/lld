@@ -221,8 +221,10 @@ Symbol *SymbolTable::addDefinedFunction(StringRef Name, uint32_t Flags,
     return S;
   }
 
-  if (Function)
-    checkFunctionType(S, File, &Function->Signature);
+  if (Function) {
+    if (Name != Config->Entry)
+       checkFunctionType(S, File, &Function->Signature);
+  }
 
   if (shouldReplace(S, File, Flags))
     replaceSymbol<DefinedFunction>(S, Name, Flags, File, Function);

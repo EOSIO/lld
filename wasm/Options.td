@@ -132,6 +132,9 @@ def max_memory: J<"max-memory=">,
 def no_entry: F<"no-entry">,
   HelpText<"Do not output any entry point">;
 
+def other_model: F<"other-model">,
+  HelpText<"Linking with a model other than EOSIO smart contract">;
+
 def stack_first: F<"stack-first">,
   HelpText<"Place stack at start of linear memory rather than after data">;
 

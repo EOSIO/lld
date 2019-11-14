@@ -125,7 +125,7 @@ private:
      } catch (std::runtime_error& err) {
         fatal(std::string(std::string("failed to write abi: ") + err.what()).c_str());
      } catch (jsoncons::json_exception& ex) {
-        fatal(std::string(std::string("failed to write abi") + ex.what()).c_str());
+        log("failed to write ABI");
      }
   }
 
@@ -1003,7 +1003,6 @@ static constexpr int OPCODE_IF   = 0x4;
 static constexpr int OPCODE_ELSE = 0x5;
 static constexpr int OPCODE_END  = 0xb;
 static constexpr int OPCODE_GET_LOCAL = 0x20;
-static constexpr int OPCODE_I32_EQ    = 0x46;
 static constexpr int OPCODE_I64_EQ    = 0x51;
 static constexpr int OPCODE_I64_NE    = 0x52;
 static constexpr int OPCODE_I32_CONST = 0x41;
@@ -1013,17 +1012,6 @@ static constexpr uint64_t EOSIO_ERROR_NO_ACTION     = EOSIO_COMPILER_ERROR_BASE;
 static constexpr uint64_t EOSIO_ERROR_ONERROR       = EOSIO_COMPILER_ERROR_BASE+1;
 
 void Writer::createDispatchFunction() {
-
-   auto get_function = [&](std::string func_name) -> int64_t {
-      for (ObjFile *File : Symtab->ObjectFiles) {
-         for (auto func : File->Functions) {
-            if (func->getName().str() == func_name) {
-               return func->getFunctionIndex();
-            }
-         }
-      }
-      return -1;
-   };
 
    auto create_if = [&](raw_string_ostream& os, std::string str, bool& need_else) {
       if (need_else) {
@@ -1052,7 +1040,9 @@ void Writer::createDispatchFunction() {
    };
 
    auto assert_sym = (FunctionSymbol*)Symtab->find("eosio_assert_code");
-   uint32_t assert_idx = assert_sym->getFunctionIndex();
+   uint32_t assert_idx = UINT32_MAX;
+   if (assert_sym)
+     assert_idx = assert_sym->getFunctionIndex();
    auto post_sym = (FunctionSymbol*)Symtab->find("post_dispatch");
 
    auto create_action_dispatch = [&](raw_string_ostream& OS) {
@@ -1084,14 +1074,17 @@ void Writer::createDispatchFunction() {
       writeU8(OS, OPCODE_IF, "if receiver != eosio");
       writeU8(OS, 0x40, "none");
 
-      // assert that no action was found
-      writeU8(OS, OPCODE_I32_CONST, "I32.CONST");
-      writeUleb128(OS, 0, "false");
-      writeU8(OS, OPCODE_I64_CONST, "I64.CONST");
-      writeUleb128(OS, EOSIO_ERROR_NO_ACTION, "error code");
-      writeU8(OS, OPCODE_CALL, "CALL");
-      writeUleb128(OS, assert_idx, "code");
-
+      if (assert_sym && assert_idx < Symtab->getSymbols().size()) {
+        // assert that no action was found
+        writeU8(OS, OPCODE_I32_CONST, "I32.CONST");
+        writeUleb128(OS, 0, "false");
+        writeU8(OS, OPCODE_I64_CONST, "I64.CONST");
+        encodeSLEB128((int64_t)EOSIO_ERROR_NO_ACTION, OS);
+        writeU8(OS, OPCODE_CALL, "CALL");
+        writeUleb128(OS, assert_idx, "code");
+      } else {
+         fatal("fatal failure: contract with no actions and trying to create dispatcher"); 
+      }
       if (post_sym) {
          writeU8(OS, OPCODE_ELSE, "ELSE");
          uint32_t post_idx  = post_sym->getFunctionIndex();
@@ -1131,24 +1124,18 @@ void Writer::createDispatchFunction() {
             }
          }
       }
-
-      writeU8(OS, OPCODE_GET_LOCAL, "GET_LOCAL");
-      writeUleb128(OS, 0, "self");
-      writeU8(OS, OPCODE_I64_CONST, "I64.CONST");
-      encodeSLEB128((int64_t)eosio::cdt::string_to_name("eosio"), OS);
-      writeU8(OS, OPCODE_I64_NE, "I64.NE");
-      writeU8(OS, OPCODE_IF, "if receiver != eosio");
-      writeU8(OS, 0x40, "none");
       
       // check for onerror first
       bool has_onerror_handler = false;
       if (not_cnt > 0) {
          for (auto const& notif0 : notify_handlers) {
-            uint64_t nm = eosio::cdt::string_to_name(notif0.first.c_str());
-            if (notif0.first == "eosio")
-               for (auto const& notif1 : notif0.second)
-                  if (notif1 == "onerror")
+            if (notif0.first == "eosio") {
+               for (auto const& notif1 : notif0.second) {
+                  if (notif1.substr(0, notif1.find(":")) == "onerror") {
                      has_onerror_handler = true;
+                  }
+               }
+            }
          }
       }
 
@@ -1160,9 +1147,8 @@ void Writer::createDispatchFunction() {
          writeU8(OS, OPCODE_GET_LOCAL, "GET_LOCAL");
          writeUleb128(OS, 1, "code");
          writeU8(OS, OPCODE_I64_EQ, "I64.EQ");
-         writeU8(OS, OPCODE_IF, "IF code == eosio");
+         writeU8(OS, OPCODE_IF, "IF code==eosio");
          writeU8(OS, 0x40, "none");
-
          writeU8(OS, OPCODE_I64_CONST, "I64.CONST");
          uint64_t nm = eosio::cdt::string_to_name("onerror");
          encodeSLEB128((int64_t)nm, OS);
@@ -1174,7 +1160,7 @@ void Writer::createDispatchFunction() {
          writeU8(OS, OPCODE_I32_CONST, "I32.CONST");
          writeUleb128(OS, 0, "false");
          writeU8(OS, OPCODE_I64_CONST, "I64.CONST");
-         writeUleb128(OS, EOSIO_ERROR_ONERROR, "error code");
+         encodeSLEB128((int64_t)EOSIO_ERROR_ONERROR, OS);
          writeU8(OS, OPCODE_CALL, "CALL");
          writeUleb128(OS, assert_idx, "code");
          writeU8(OS, OPCODE_END, "END");
@@ -1184,10 +1170,12 @@ void Writer::createDispatchFunction() {
       // dispatch notification handlers
       bool notify0_need_else = false;
       if (not_cnt > 0) {
+         bool has_written = false;
          for (auto const& notif0 : notify_handlers) {
             uint64_t nm = eosio::cdt::string_to_name(notif0.first.c_str());
             if (notif0.first == "*")
                continue;
+            has_written = true;
             if (notify0_need_else)
                writeU8(OS, OPCODE_ELSE, "ELSE");
             writeU8(OS, OPCODE_I64_CONST, "I64.CONST");
@@ -1200,10 +1188,12 @@ void Writer::createDispatchFunction() {
             bool need_else = false;
             for (auto const& notif1 : notif0.second)
                create_if(OS, notif1, need_else);
+            for (int i=0; i < notif0.second.size(); i++)
+               writeU8(OS, OPCODE_END, "END");
             notify0_need_else = true;
          }
-         writeU8(OS, OPCODE_END, "END");
-         writeU8(OS, OPCODE_ELSE, "ELSE");
+         if (has_written)
+            writeU8(OS, OPCODE_ELSE, "ELSE");
       }
 
       if (!notify_handlers["*"].empty()) {
@@ -1224,9 +1214,10 @@ void Writer::createDispatchFunction() {
          writeUleb128(OS, 2, "action");
          writeU8(OS, OPCODE_CALL, "CALL");
          writeUleb128(OS, post_idx, "post_dispatch call");
+         writeU8(OS, OPCODE_END, "END");
       }
 
-      for (int i=0; i < not_cnt; i++)
+      for (int i=0; i < notify_handlers["*"].size(); i++)
         writeU8(OS, OPCODE_END, "END");
    };
 
@@ -1285,7 +1276,7 @@ void Writer::createDispatchFunction() {
       auto dtors_sym = (FunctionSymbol*)Symtab->find("__cxa_finalize");
       if (dtors_sym) {
          uint32_t dtors_idx = dtors_sym->getFunctionIndex();
-         if (dtors_idx != 0) {
+         if (dtors_idx != 0 && dtors_idx < Symtab->getSymbols().size()) {
             writeU8(OS, OPCODE_I32_CONST, "I32.CONST");
             writeUleb128(OS, (uint32_t)0, "NULL");
             writeU8(OS, OPCODE_CALL, "CALL");
@@ -1306,7 +1297,7 @@ void Writer::createDispatchFunction() {
 
    ArrayRef<uint8_t> Body = toArrayRef(Saver.save(FunctionBody));
    cast<SyntheticFunction>(WasmSym::EntryFunc->Function)->setBody(Body);
-}
+};
 
 // Create synthetic "__wasm_call_ctors" function based on ctor functions
 // in input object.
@@ -1370,7 +1361,7 @@ void Writer::run(bool is_entry_defined) {
   if (!Config->Relocatable)
     createCtorFunction();
 
-  if (Symtab->EntryIsUndefined)
+  if (!Config->OtherModel && Symtab->EntryIsUndefined)
      createDispatchFunction();
 
   log("-- calculateTypes");
